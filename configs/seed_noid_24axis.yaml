@@ -1,0 +1,26 @@
+# Reference values for converting to LeRobot CLI arguments.
+# LeRobot/draccus CLI accepts nested --robot.* arguments directly.
+robot:
+  type: seed_noid
+  id: seed_noid_24axis
+  ros_node_name: lerobot_seed_noid
+  joint_state_topic: /joint_states
+  joint_command_transport: topic
+  trajectory_duration_s: 0.6
+
+  # Feature contract: existing state/action 24-axis order.
+  observation_groups: [rarm, rhand, larm, lhand, waist, lifter, head]
+  action_groups: [rarm, rhand, larm, lhand, waist, lifter, head]
+
+  # Safety gate. Start with rarm only, then add groups after validation.
+  command_groups: [rarm]
+  max_relative_target: 0.04
+
+  ros_image_topics:
+    camera1: /camera/camera/color/image_raw
+  ros_image_shapes:
+    camera1: [720, 1280, 3]
+
+  hand_command_modes:
+    rhand: joint_trajectory
+    lhand: joint_trajectory
