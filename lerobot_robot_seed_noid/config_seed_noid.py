@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
 
 try:
     from lerobot.cameras import CameraConfig
@@ -97,7 +96,7 @@ class SeedNoidConfig(RobotConfig):
 
     # ROS 2 controller mapping.
     controller_names: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_CONTROLLER_NAMES))
-    joint_command_transport: Literal["topic", "action"] = "topic"
+    joint_command_transport: str = "topic"
     joint_trajectory_topics: dict[str, str] = field(default_factory=dict)
     follow_joint_trajectory_actions: dict[str, str] = field(default_factory=dict)
     trajectory_duration_s: float = 0.60
@@ -113,7 +112,7 @@ class SeedNoidConfig(RobotConfig):
     wait_for_joint_state_s: float = 10.0
     wait_for_images_s: float = 15.0
     stale_joint_state_s: float = 2.0
-    missing_joint_policy: Literal["nan", "zero", "raise"] = "raise"
+    missing_joint_policy: str = "raise"
 
     # Optional mobile-base action features.
     include_base_actions: bool = False
@@ -123,7 +122,7 @@ class SeedNoidConfig(RobotConfig):
 
     # Each hand can use its JointTrajectoryController, the existing RunScript
     # service, or be disabled while retaining the 24-axis feature contract.
-    hand_command_modes: dict[str, Literal["joint_trajectory", "script_service", "disabled"]] = field(
+    hand_command_modes: dict[str, str] = field(
         default_factory=lambda: {"rhand": "joint_trajectory", "lhand": "joint_trajectory"}
     )
     hand_grasp_threshold: float = 0.75
@@ -141,7 +140,7 @@ class SeedNoidConfig(RobotConfig):
     ros_image_topics: dict[str, str] = field(default_factory=dict)
     ros_image_shapes: dict[str, tuple[int, int, int]] = field(default_factory=dict)
     stale_image_s: float = 2.0
-    missing_image_policy: Literal["zero", "raise"] = "raise"
+    missing_image_policy: str = "raise"
 
     # Native LeRobot cameras can be mixed with ROS image topics.
     cameras: dict[str, CameraConfig] = field(default_factory=dict)
@@ -199,6 +198,42 @@ class SeedNoidConfig(RobotConfig):
         for name, shape in self.ros_image_shapes.items():
             if len(shape) != 3 or shape[2] not in (1, 3):
                 raise ValueError(f"ROS image {name!r} must have shape (H, W, 1|3), got {shape}")
+
+        allowed_transprts = {"topic", "action"}
+        if self.joint_command_transport not in allowed_transprts:
+            raise ValueError("joint_command_transport must be one of " f"{sorted(allowed_transprts)}," f"got{self.joint_command_transport!r}")
+        
+        allowed_missing_joint_policies = {"nan", "zero", "raise"}
+        if self.missing_joint_policy not in allowed_missing_joint_policies:
+            raise ValueError("missing_joint_policy must be one of " f"{sorted(allowed_missing_joint_policies)}," f"got {self.missing_joint_policy!r}")
+
+        allowed_missing_image_policies = {"zero", "raise"}
+        if self.missing_image_policy not in allowed_missing_image_policies:
+            raise ValueError("missing_image_policy must be one of " f"{sorted(allowed_missing_image_policies)}, " f"got {self.missing_image_policy!r}")
+
+        allowed_transports = {"topic", "action"}
+        if self.joint_command_transport not in allowed_transports:
+            raise ValueError(
+                "joint_command_transport must be one of "
+                f"{sorted(allowed_transports)}, "
+                f"got {self.joint_command_transport!r}"
+            )
+
+        allowed_missing_joint_policies = {"nan", "zero", "raise"}
+        if self.missing_joint_policy not in allowed_missing_joint_policies:
+            raise ValueError(
+                "missing_joint_policy must be one of "
+                f"{sorted(allowed_missing_joint_policies)}, "
+                f"got {self.missing_joint_policy!r}"
+            )
+
+        allowed_missing_image_policies = {"zero", "raise"}
+        if self.missing_image_policy not in allowed_missing_image_policies:
+            raise ValueError(
+                "missing_image_policy must be one of "
+                f"{sorted(allowed_missing_image_policies)}, "
+                f"got {self.missing_image_policy!r}"
+            )
 
         allowed_hand_modes = {"joint_trajectory", "script_service", "disabled"}
         for hand in ("rhand", "lhand"):

@@ -38,7 +38,7 @@ See `MIGRATION.md`.
 source /opt/ros/jazzy/setup.bash
 source ~/ros2/ros2_ws7/install/setup.bash
 
-# The venv must be able to import apt-installed rclpy/cv_bridge.
+# The plugin does not require the Python cv_bridge binding for sensor_msgs/Image topics.
 python3 -m venv --system-site-packages ~/venvs/lerobot_seed_noid
 source ~/venvs/lerobot_seed_noid/bin/activate
 

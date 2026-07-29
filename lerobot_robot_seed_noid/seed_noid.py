@@ -38,10 +38,9 @@ class _RosDeps:
     qos_profile_sensor_data: Any
     RunScript: Any | None
     ScriptReqJNoInterf: Any | None
-    CvBridge: Any | None
 
 
-def _load_ros_deps(*, require_images: bool, require_hand_service: bool) -> _RosDeps:
+def _load_ros_deps(*, require_hand_service: bool) -> _RosDeps:
     """Import ROS 2 lazily so LeRobot can discover the plugin before ROS is sourced."""
     try:
         import rclpy
@@ -76,18 +75,6 @@ def _load_ros_deps(*, require_images: bool, require_hand_service: bool) -> _RosD
                 "Build and source seed_robot_ros2_pkg, or use joint_trajectory/disabled."
             ) from exc
 
-    cv_bridge = None
-    if require_images:
-        try:
-            from cv_bridge import CvBridge
-
-            cv_bridge = CvBridge
-        except Exception as exc:  # pragma: no cover
-            raise RuntimeError(
-                "cv_bridge is required when ros_image_topics is configured. "
-                "Install/source ros-jazzy-cv-bridge or configure native LeRobot cameras."
-            ) from exc
-
     return _RosDeps(
         rclpy=rclpy,
         JointState=JointState,
@@ -102,12 +89,74 @@ def _load_ros_deps(*, require_images: bool, require_hand_service: bool) -> _RosD
         qos_profile_sensor_data=qos_profile_sensor_data,
         RunScript=run_script,
         ScriptReqJNoInterf=script_request,
-        CvBridge=cv_bridge,
     )
 
 
 def _unique_ordered(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
+
+
+
+def _ros_image_to_rgb8(msg: Any) -> np.ndarray:
+    """Convert sensor_msgs/Image into an HWC RGB uint8 NumPy array.
+    Supported encodings:
+      - rgb8
+      - bgr8
+      - rgba8
+      - bgra8
+      - mono8
+    The ROS Image.step field is respected, including row padding.
+    """
+    height = int(msg.height)
+    width = int(msg.width)
+    step = int(msg.step)
+    encoding = str(msg.encoding).lower()
+    if height <= 0 or width <= 0:
+        raise ValueError(
+            f"Invalid ROS image dimensions: height={height}, width={width}"
+        )
+    source_channels = {
+        "rgb8": 3,
+        "bgr8": 3,
+        "rgba8": 4,
+        "bgra8": 4,
+        "mono8": 1,
+    }.get(encoding)
+    if source_channels is None:
+        raise ValueError(
+            f"Unsupported ROS image encoding: {msg.encoding!r}. "
+            "Supported encodings are rgb8, bgr8, rgba8, bgra8 and mono8."
+        )
+    required_row_bytes = width * source_channels
+    if step < required_row_bytes:
+        raise ValueError(
+            f"ROS image step={step} is smaller than the required "
+            f"{required_row_bytes} bytes for encoding={encoding!r}"
+        )
+    buffer = np.frombuffer(msg.data, dtype=np.uint8)
+    required_size = height * step
+    if buffer.size < required_size:
+        raise ValueError(
+            f"ROS image data is too short: received={buffer.size}, "
+            f"required={required_size}"
+        )
+    # Respect row padding expressed by msg.step.
+    rows = buffer[:required_size].reshape(height, step)
+    pixels = rows[:, :required_row_bytes]
+    image = pixels.reshape(height, width, source_channels)
+    if encoding == "rgb8":
+        rgb = image
+    elif encoding == "bgr8":
+        rgb = image[:, :, [2, 1, 0]]
+    elif encoding == "rgba8":
+        rgb = image[:, :, :3]
+    elif encoding == "bgra8":
+        rgb = image[:, :, [2, 1, 0]]
+    elif encoding == "mono8":
+        rgb = np.repeat(image, repeats=3, axis=2)
+    else:
+        raise AssertionError(f"Unhandled encoding: {encoding}")
+    return np.ascontiguousarray(rgb, dtype=np.uint8)
 
 
 def _duration_msg(duration_cls: Any, seconds: float) -> Any:
@@ -179,7 +228,6 @@ class SeedNoid(Robot):
         self._image_lock = threading.Lock()
         self._ros_images: dict[str, np.ndarray] = {}
         self._ros_image_stamps: dict[str, float] = {}
-        self._cv_bridge: Any | None = None
 
         self._joint_publishers: dict[str, Any] = {}
         self._joint_action_clients: dict[str, Any] = {}
@@ -280,7 +328,6 @@ class SeedNoid(Robot):
             return
 
         self._ros = _load_ros_deps(
-            require_images=bool(self.config.ros_image_topics),
             require_hand_service=bool(self._service_hand_groups),
         )
         rclpy = self._ros.rclpy
@@ -298,7 +345,6 @@ class SeedNoid(Robot):
         )
 
         if self.config.ros_image_topics:
-            self._cv_bridge = self._ros.CvBridge()
             for name, topic in self.config.ros_image_topics.items():
                 self._node.create_subscription(
                     self._ros.Image,
@@ -464,8 +510,20 @@ class SeedNoid(Robot):
             self._joint_state_stamp = time.monotonic()
 
     def _on_ros_image(self, name: str, msg: Any) -> None:
-        image = self._cv_bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
-        image = image if isinstance(image, np.ndarray) else np.asarray(image)
+        try:
+            image = _ros_image_to_rgb8(msg)
+        except Exception as exc:
+            if self._node is not None:
+                self._node.get_logger().error(f"Failed tp convert ROS image {name!r}: {exc}")
+            return
+        
+        expected_shape = tuple(self.config.ros_image_shapes[name])
+
+        if tuple(image.shape) != expected_shape:
+            if self._node is not None:
+                self._node.get_logger().error(f"ROS image {name!r} has shape {image.shape}, " f"expected {expected_shape}")
+            return
+            
         with self._image_lock:
             self._ros_images[name] = image
             self._ros_image_stamps[name] = time.monotonic()
