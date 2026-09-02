@@ -9,10 +9,8 @@ robot:
   trajectory_duration_s: 0.6
 
   # Feature contract: existing state/action 24-axis order.
-  # observation_groups: [rarm, rhand, larm, lhand, waist, lifter, head]
-  # action_groups: [rarm, rhand, larm, lhand, waist, lifter, head]
-  observation_groups: [rarm]
-  action_groups: [rarm]
+  observation_groups: [rarm, rhand, larm, lhand, waist, lifter, head]
+  action_groups: [rarm, rhand, larm, lhand, waist, lifter, head]
 
   # Safety gate. Start with rarm only, then add groups after validation.
   command_groups: [rarm, rhand, larm, lhand, waist, lifter, head]

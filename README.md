@@ -52,30 +52,15 @@ ROS 2 / SEED-Noid
 ROS 2 workspace は環境ごとに異なるため、以下のように設定します。
 
 ```bash
-export ROBOT_WS=~/ros2/<workspace>
+export ROBOT_WS=~/<workspace_ros2>
+export LEROBOT_WS=~/<workspace_lerobot>
 ```
 
 ROS 2 を使うターミナルでは次を実行します。
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-<<<<<<< HEAD
-source ~/ros2/ros2_ws7/install/setup.bash
-
-# The plugin does not require the Python cv_bridge binding for sensor_msgs/Image topics.
-python3 -m venv --system-site-packages ~/venvs/lerobot_seed_noid
-source ~/venvs/lerobot_seed_noid/bin/activate
-
-# Install the desired LeRobot extras in the same environment.
-pip install 'lerobot[core_scripts]'
-# For the separate async PolicyServer/RobotClient path:
-pip install 'lerobot[async]'
-
-cd /path/to/lerobot_robot_seed_noid
-pip install -e .
-=======
 source "${ROBOT_WS}/install/setup.bash"
->>>>>>> c4dcac6 (Refactoring plugin)
 ```
 
 ## Python 環境
@@ -89,9 +74,17 @@ python3.12 -m venv \
 
 source ~/venvs/lerobot_v060/bin/activate
 
-python -m pip install --upgrade pip setuptools wheel
-python -m pip install -r lerobot_v060_requirements.txt
-python -m pip install -e .
+python -m pip install --upgrade pip wheel
+python -m pip install "setuptools==79.0.1"
+python -m pip install "lerobot==0.6.0"
+python -m pip install "lerobot[dataset]==0.6.0"
+python -m pip install "lerobot[training]==0.6.0"
+python -m pip install "lerobot[pi,async]==0.6.0"
+
+cd {LEROBOT_WS}
+git clone https://github.com/thkrrc1/lerobot_robot_seed_noid.git
+cd lerobot_robot_seed_noid
+python -m pip install -e . --no-deps
 ```
 
 依存関係確認：

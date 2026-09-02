@@ -162,8 +162,6 @@ def _ros_image_to_rgb8(msg: Any) -> np.ndarray:
     return np.ascontiguousarray(rgb, dtype=np.uint8)
 
 
-<<<<<<< HEAD:lerobot_robot_seed_noid/seed_noid.py
-=======
 def _ros_compressed_image_to_rgb8(msg: Any) -> np.ndarray:
     """Convert sensor_msgs/CompressedImage (JPEG/PNG) to HWC RGB uint8."""
     try:
@@ -190,7 +188,6 @@ def _ros_compressed_image_to_rgb8(msg: Any) -> np.ndarray:
     return np.ascontiguousarray(image, dtype=np.uint8)
 
 
->>>>>>> c4dcac6 (Refactoring plugin):src/lerobot_robot_seed_noid/seed_noid.py
 def _duration_msg(duration_cls: Any, seconds: float) -> Any:
     sec = int(seconds)
     nanosec = int(round((seconds - sec) * 1_000_000_000))
@@ -558,11 +555,7 @@ class SeedNoid(Robot):
             image = _ros_image_to_rgb8(msg)
         except Exception as exc:
             if self._node is not None:
-<<<<<<< HEAD:lerobot_robot_seed_noid/seed_noid.py
-                self._node.get_logger().error(f"Failed tp convert ROS image {name!r}: {exc}")
-=======
                 self._node.get_logger().error(f"Failed to convert ROS image {name!r}: {exc}")
->>>>>>> c4dcac6 (Refactoring plugin):src/lerobot_robot_seed_noid/seed_noid.py
             return
         
         expected_shape = tuple(self.config.ros_image_shapes[name])
@@ -572,8 +565,6 @@ class SeedNoid(Robot):
                 self._node.get_logger().error(f"ROS image {name!r} has shape {image.shape}, " f"expected {expected_shape}")
             return
             
-<<<<<<< HEAD:lerobot_robot_seed_noid/seed_noid.py
-=======
         with self._image_lock:
             self._ros_images[name] = image
             self._ros_image_stamps[name] = time.monotonic()
@@ -597,7 +588,6 @@ class SeedNoid(Robot):
                 )
             return
 
->>>>>>> c4dcac6 (Refactoring plugin):src/lerobot_robot_seed_noid/seed_noid.py
         with self._image_lock:
             self._ros_images[name] = image
             self._ros_image_stamps[name] = time.monotonic()

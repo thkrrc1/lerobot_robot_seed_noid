@@ -1,9 +1,14 @@
 # ============================================================
 # lerobot_robot_seed_noid
 # ============================================================
-
+# Python cache
 __pycache__/
-*.py[cod]
+*.pyc
+
+#projectファイルとcptroject ファイルはいらない
+*.cproject
+*.project
+
 *.egg-info/
 .pytest_cache/
 *.log
