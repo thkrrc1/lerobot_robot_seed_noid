@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import threading
 import time
+from io import BytesIO
 from dataclasses import dataclass
 from typing import Any
 
@@ -28,6 +29,7 @@ class _RosDeps:
     rclpy: Any
     JointState: Any
     Image: Any
+    CompressedImage: Any
     Twist: Any
     JointTrajectory: Any
     JointTrajectoryPoint: Any
@@ -50,13 +52,13 @@ def _load_ros_deps(*, require_hand_service: bool) -> _RosDeps:
         from rclpy.action import ActionClient
         from rclpy.executors import MultiThreadedExecutor
         from rclpy.qos import qos_profile_sensor_data
-        from sensor_msgs.msg import Image, JointState
+        from sensor_msgs.msg import Image, CompressedImage, JointState
         from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
     except Exception as exc:  # pragma: no cover - requires ROS 2 Jazzy environment
         raise RuntimeError(
             "ROS 2 Python packages are not importable. Source ROS 2 and the robot workspace first:\n"
             "  source /opt/ros/jazzy/setup.bash\n"
-            "  source ~/ros2/ros2_ws7/install/setup.bash\n"
+            "  source ~<robot_workspace>/install/setup.bash\n"
             "Use a virtual environment created with --system-site-packages."
         ) from exc
 
@@ -79,6 +81,7 @@ def _load_ros_deps(*, require_hand_service: bool) -> _RosDeps:
         rclpy=rclpy,
         JointState=JointState,
         Image=Image,
+        CompressedImage=CompressedImage,
         Twist=Twist,
         JointTrajectory=JointTrajectory,
         JointTrajectoryPoint=JointTrajectoryPoint,
@@ -159,6 +162,35 @@ def _ros_image_to_rgb8(msg: Any) -> np.ndarray:
     return np.ascontiguousarray(rgb, dtype=np.uint8)
 
 
+<<<<<<< HEAD:lerobot_robot_seed_noid/seed_noid.py
+=======
+def _ros_compressed_image_to_rgb8(msg: Any) -> np.ndarray:
+    """Convert sensor_msgs/CompressedImage (JPEG/PNG) to HWC RGB uint8."""
+    try:
+        from PIL import Image as PILImage
+    except ImportError as exc:
+        raise RuntimeError(
+            "Pillow is required for sensor_msgs/CompressedImage. "
+            "Install it with: python -m pip install pillow"
+        ) from exc
+
+    try:
+        with PILImage.open(BytesIO(bytes(msg.data))) as pil_image:
+            image = np.asarray(pil_image.convert("RGB"), dtype=np.uint8)
+    except Exception as exc:
+        raise ValueError(
+            f"Failed to decode compressed ROS image: format={getattr(msg, 'format', '')!r}"
+        ) from exc
+
+    if image.ndim != 3 or image.shape[2] != 3:
+        raise ValueError(
+            f"Decoded compressed ROS image must have shape (H, W, 3), got {image.shape}"
+        )
+
+    return np.ascontiguousarray(image, dtype=np.uint8)
+
+
+>>>>>>> c4dcac6 (Refactoring plugin):src/lerobot_robot_seed_noid/seed_noid.py
 def _duration_msg(duration_cls: Any, seconds: float) -> Any:
     sec = int(seconds)
     nanosec = int(round((seconds - sec) * 1_000_000_000))
@@ -346,12 +378,24 @@ class SeedNoid(Robot):
 
         if self.config.ros_image_topics:
             for name, topic in self.config.ros_image_topics.items():
-                self._node.create_subscription(
-                    self._ros.Image,
-                    topic,
-                    lambda msg, camera_name=name: self._on_ros_image(camera_name, msg),
-                    qos,
-                )
+                if topic.endswith("/compressed"):
+                    self._node.create_subscription(
+                        self._ros.CompressedImage,
+                        topic,
+                        lambda msg, camera_name=name: self._on_ros_compressed_image(
+                            camera_name, msg
+                        ),
+                        qos,
+                    )
+                else:
+                    self._node.create_subscription(
+                        self._ros.Image,
+                        topic,
+                        lambda msg, camera_name=name: self._on_ros_image(
+                            camera_name, msg
+                        ),
+                        qos,
+                    )
 
         if self.config.joint_command_transport == "topic":
             for group, topic in self._joint_command_endpoints("topic").items():
@@ -514,7 +558,11 @@ class SeedNoid(Robot):
             image = _ros_image_to_rgb8(msg)
         except Exception as exc:
             if self._node is not None:
+<<<<<<< HEAD:lerobot_robot_seed_noid/seed_noid.py
                 self._node.get_logger().error(f"Failed tp convert ROS image {name!r}: {exc}")
+=======
+                self._node.get_logger().error(f"Failed to convert ROS image {name!r}: {exc}")
+>>>>>>> c4dcac6 (Refactoring plugin):src/lerobot_robot_seed_noid/seed_noid.py
             return
         
         expected_shape = tuple(self.config.ros_image_shapes[name])
@@ -524,6 +572,32 @@ class SeedNoid(Robot):
                 self._node.get_logger().error(f"ROS image {name!r} has shape {image.shape}, " f"expected {expected_shape}")
             return
             
+<<<<<<< HEAD:lerobot_robot_seed_noid/seed_noid.py
+=======
+        with self._image_lock:
+            self._ros_images[name] = image
+            self._ros_image_stamps[name] = time.monotonic()
+
+    def _on_ros_compressed_image(self, name: str, msg: Any) -> None:
+        try:
+            image = _ros_compressed_image_to_rgb8(msg)
+        except Exception as exc:
+            if self._node is not None:
+                self._node.get_logger().error(
+                    f"Failed to convert compressed ROS image {name!r}: {exc}"
+                )
+            return
+
+        expected_shape = tuple(self.config.ros_image_shapes[name])
+        if tuple(image.shape) != expected_shape:
+            if self._node is not None:
+                self._node.get_logger().error(
+                    f"Compressed ROS image {name!r} has shape {image.shape}, "
+                    f"expected {expected_shape}"
+                )
+            return
+
+>>>>>>> c4dcac6 (Refactoring plugin):src/lerobot_robot_seed_noid/seed_noid.py
         with self._image_lock:
             self._ros_images[name] = image
             self._ros_image_stamps[name] = time.monotonic()
@@ -739,3 +813,4 @@ class SeedNoid(Robot):
         if limit == math.inf:
             return float(value)
         return min(max(float(value), -abs(float(limit))), abs(float(limit)))
+

@@ -1,41 +1,65 @@
-# lerobot_robot_seed_noid
+# LeRobot + SEED-Noid
 
-External LeRobot `Robot` plugin for the SEED/NOID ROS 2 Jazzy + ros2_control stack.
-It is installed locally and does **not** require a pull request to the LeRobot GitHub repository.
+SEED-Noid を LeRobot から利用するための Robot Plugin と、ROS 2 Bag から LeRobot Dataset を作成するための変換ツールです。
 
-## Architecture
+## 全体フロー
 
 ```text
-LeRobot CLI / rollout / async / RTC
-            |
-      SeedNoid Robot plugin
-            |
-  ROS 2 topics/actions/services
-            |
- ros2_control controllers / hardware
+ROS 2 / SEED-Noid
+        │
+        ├─ ROS 2 Bag
+        │      │
+        │      ▼
+        │  Dataset Converter
+        │      │
+        │      ▼
+        │  LeRobot Dataset
+        │      │
+        │      ▼
+        │     π0 学習
+        │      │
+        │      ▼
+        │   Checkpoint
+        │
+        └─ Robot Plugin
+               │
+               ▼
+          RobotClient
+               │
+               ▼
+          PolicyServer
+               │
+               ▼
+           SEED-Noid
 ```
 
-The plugin exposes the existing 24-axis feature order to LeRobot and distributes
-commands internally to multiple JointTrajectoryController endpoints.
+## ドキュメント
 
-## What changed from the custom Bridge
+- [Robot Plugin](src/lerobot_robot_seed_noid/README.md)
+- [ROS 2 Bag → LeRobot Dataset](dataset_tools/README.md)
+- [設定ファイル](configs/README.md)
+- [π0 学習](docs/training.md)
+- [Async 推論](docs/inference.md)
 
-The plugin does not contain its own policy-loading or inference loop. LeRobot handles:
+## 前提
 
-- checkpoint/policy loading
-- preprocessor and postprocessor pipelines
-- synchronous rollout
-- RTC rollout
-- asynchronous policy server/client execution
-- dataset recording
+- Ubuntu 24.04
+- ROS 2 Jazzy
+- Python 3.12
+- LeRobot v0.6.0 系
+- NVIDIA GPU / CUDA（π0 学習・GPU 推論時）
 
-The plugin handles only robot I/O, feature ordering, controller routing, and safety.
-See `MIGRATION.md`.
+ROS 2 workspace は環境ごとに異なるため、以下のように設定します。
 
-## Installation
+```bash
+export ROBOT_WS=~/ros2/<workspace>
+```
+
+ROS 2 を使うターミナルでは次を実行します。
 
 ```bash
 source /opt/ros/jazzy/setup.bash
+<<<<<<< HEAD
 source ~/ros2/ros2_ws7/install/setup.bash
 
 # The plugin does not require the Python cv_bridge binding for sensor_msgs/Image topics.
@@ -49,182 +73,97 @@ pip install 'lerobot[async]'
 
 cd /path/to/lerobot_robot_seed_noid
 pip install -e .
+=======
+source "${ROBOT_WS}/install/setup.bash"
+>>>>>>> c4dcac6 (Refactoring plugin)
 ```
 
-No upload to PyPI or GitHub is required. `pip install -e .` registers the external
-package in the local Python environment, and LeRobot discovers the
-`lerobot_robot_` package prefix automatically.
+## Python 環境
 
-## Verify plugin discovery without connecting ROS 2
+ROS 2 の Python package を venv から利用するため、`--system-site-packages` を付けます。
 
 ```bash
-python examples/check_plugin.py
+python3.12 -m venv \
+  --system-site-packages \
+  ~/venvs/lerobot_v060
+
+source ~/venvs/lerobot_v060/bin/activate
+
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r lerobot_v060_requirements.txt
+python -m pip install -e .
 ```
 
-Expected key points:
-
-- robot class: `SeedNoid`
-- `action dimension: 24`
-- default `command_groups: ['rarm']`
-
-## Observe the ROS 2 robot without sending commands
+依存関係確認：
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-source ~/ros2/ros2_ws7/install/setup.bash
-python examples/read_observation.py
+python -m pip check
 ```
 
-## Existing 24-axis order
+## 共通 Feature Contract
+
+### State / Action
+
+全軸を以下の順序で使用します。
 
 ```text
-0..6   rarm
-7      rhand / r_thumb_joint
-8..14  larm
-15     lhand / l_thumb_joint
-16..18 waist
-19..20 lifter
-21..23 head
+rarm(7)
+→ rhand(1)
+→ larm(7)
+→ lhand(1)
+→ waist(3)
+→ lifter(2)
+→ head(3)
 ```
 
-`action_groups` defines this LeRobot feature contract. `command_groups` is a
-separate safety gate. This allows an existing 24-axis checkpoint to pass feature
-compatibility checks while initially commanding only the right arm.
+合計：
 
-## Base synchronous rollout
+```text
+all axis
+```
+
+Dataset 作成後にこの順序を変更しないでください。
+
+### Camera
+
+```text
+head  → /camera1/image_raw/compressed → 480 x 640 x 3
+right → /camera2/image_raw/compressed → 480 x 640 x 3
+left  → /camera3/image_raw/compressed → 480 x 640 x 3
+```
+
+LeRobot Dataset 上では以下になります。
+
+```text
+observation.images.head
+observation.images.right
+observation.images.left
+```
+
+Dataset、学習済み Checkpoint、推論で同じ Camera 名を使用してください。
+
+## 最短の確認
+
+Plugin：
 
 ```bash
-lerobot-rollout \
-  --strategy.type=base \
-  --policy.path=/home/seed/learning_output/output_lerobot/pi0_robot_mouse_pick_place_100steps/checkpoints/last/pretrained_model \
-  --robot.type=seed_noid \
-  --robot.id=seed_noid_pi0 \
-  --robot.joint_state_topic=/joint_states \
-  --robot.joint_command_transport=topic \
-  --robot.trajectory_duration_s=0.6 \
-  --robot.action_groups='[rarm,rhand,larm,lhand,waist,lifter,head]' \
-  --robot.command_groups='[rarm]' \
-  --robot.max_relative_target=0.04 \
-  --robot.ros_image_topics='{camera1: /camera/camera/color/image_raw}' \
-  --robot.ros_image_shapes='{camera1: [720,1280,3]}' \
-  --task='pick up the mouse from the desk, lift it, lower it, and place it back on the desk' \
-  --duration=120 \
-  --device=cuda
+python -c "import lerobot_robot_seed_noid; print('OK')"
 ```
 
-Confirm the exact `lerobot-rollout --help` spelling for the installed LeRobot
-version because the rollout CLI is evolving.
-
-## RTC rollout
-
-RTC is provided by LeRobot, not by this package.
+ROS 2：
 
 ```bash
-lerobot-rollout \
-  --strategy.type=base \
-  --policy.path=/path/to/checkpoints/last/pretrained_model \
-  --inference.type=rtc \
-  --inference.rtc.execution_horizon=10 \
-  --inference.rtc.max_guidance_weight=10.0 \
-  --robot.type=seed_noid \
-  --robot.id=seed_noid_pi0_rtc \
-  --robot.joint_command_transport=topic \
-  --robot.action_groups='[rarm,rhand,larm,lhand,waist,lifter,head]' \
-  --robot.command_groups='[rarm]' \
-  --robot.max_relative_target=0.04 \
-  --robot.ros_image_topics='{camera1: /camera/camera/color/image_raw}' \
-  --robot.ros_image_shapes='{camera1: [720,1280,3]}' \
-  --task='pick up the mouse from the desk, lift it, lower it, and place it back on the desk' \
-  --duration=120 \
-  --device=cuda
+ros2 topic echo /joint_states --once
+ros2 topic list | grep -Ei "camera|image"
 ```
 
-RTC only applies to policies supported by the installed LeRobot version.
-
-## LeRobot async PolicyServer / RobotClient
-
-Terminal 1:
+Dataset：
 
 ```bash
-python -m lerobot.async_inference.policy_server --host=127.0.0.1 --port=8080
+python dataset_tools/rosbag_to_lerobot_dataset.py \
+  --config-file configs/dataset_config.yaml \
+  --bag ~/rosbag/<episode> \
+  --inspect-only
 ```
 
-Terminal 2:
-
-```bash
-python -m lerobot.async_inference.robot_client \
-  --server_address=127.0.0.1:8080 \
-  --robot.type=seed_noid \
-  --robot.id=seed_noid_async \
-  --robot.joint_command_transport=topic \
-  --robot.action_groups='[rarm,rhand,larm,lhand,waist,lifter,head]' \
-  --robot.command_groups='[rarm]' \
-  --robot.max_relative_target=0.04 \
-  --robot.ros_image_topics='{camera1: /camera/camera/color/image_raw}' \
-  --robot.ros_image_shapes='{camera1: [720,1280,3]}' \
-  --task='pick up the mouse from the desk' \
-  --policy_type=pi0 \
-  --pretrained_name_or_path=/path/to/checkpoints/last/pretrained_model \
-  --policy_device=cuda \
-  --actions_per_chunk=50
-```
-
-Use the async command names shown by the installed version's `--help`; the
-server/client interface can change between LeRobot releases.
-
-## Dataset recording
-
-The Robot plugin is sufficient for rollout, RTC, and the async robot client.
-`lerobot-record` additionally requires a LeRobot `Teleoperator` plugin whose
-action feature names match this robot. Until that teleoperator exists, keep using
-the ROSBag converter under `legacy_tools/` for demonstrations.
-
-Once a compatible teleoperator is installed:
-
-```bash
-lerobot-record \
-  --robot.type=seed_noid \
-  --robot.id=seed_noid_record \
-  --robot.action_groups='[rarm,rhand,larm,lhand,waist,lifter,head]' \
-  --robot.command_groups='[rarm]' \
-  --robot.ros_image_topics='{camera1: /camera/camera/color/image_raw}' \
-  --robot.ros_image_shapes='{camera1: [720,1280,3]}' \
-  --teleop.type=<compatible_teleoperator> \
-  --dataset.repo_id=local/seed_noid_dataset \
-  --dataset.root=/home/seed/lerobot_datasets/seed_noid_dataset \
-  --dataset.fps=10 \
-  --dataset.num_episodes=10 \
-  --dataset.single_task='pick up the mouse'
-```
-
-## Hand command modes
-
-For each hand:
-
-- `joint_trajectory`: send the thumb action to the hand controller.
-- `script_service`: convert the existing thumb action value to the Aero
-  `RunScript` grasp/release service using thresholds.
-- `disabled`: retain the action feature but do not command the hand.
-
-Example:
-
-```bash
---robot.command_groups='[rarm,rhand]' \
---robot.hand_command_modes='{rhand: script_service, lhand: disabled}' \
---robot.hand_grasp_threshold=0.75 \
---robot.hand_release_threshold=0.25
-```
-
-## Multiple controllers
-
-LeRobot sees one ordered action vector. `SeedNoid.send_action()` distributes it
-to the configured ROS 2 controllers. Controller count does not change the
-LeRobot dataset or policy interface.
-
-## Safety notes
-
-- Default feature dimension is 24, but only `rarm` is commanded by default.
-- Start with `command_groups=[rarm]` and add one group at a time.
-- Keep `max_relative_target` enabled during initial tests.
-- Populate `joint_position_limits` from the actual URDF/controller limits.
-- Verify action/state order against the checkpoint metadata before motion.
+詳細は各ドキュメントを参照してください。

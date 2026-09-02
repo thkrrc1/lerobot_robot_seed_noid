@@ -2,7 +2,7 @@
 # LeRobot/draccus CLI accepts nested --robot.* arguments directly.
 robot:
   type: seed_noid
-  id: seed_noid_24axis
+  id: seed_noid
   ros_node_name: lerobot_seed_noid
   joint_state_topic: /joint_states
   joint_command_transport: topic
@@ -15,14 +15,19 @@ robot:
   action_groups: [rarm]
 
   # Safety gate. Start with rarm only, then add groups after validation.
-  command_groups: [rarm]
+  command_groups: [rarm, rhand, larm, lhand, waist, lifter, head]
   max_relative_target: 0.04
 
   ros_image_topics:
-    camera1: /camera/camera/color/image_raw
-  ros_image_shapes:
-    camera1: [720, 1280, 3]
+    head: /camera1/image_raw/compressed
+    right: /camera2/image_raw/compressed
+    left: /camera3/image_raw/compressed
 
+  ros_image_shapes:
+    head: [480, 640, 3]
+    right: [480, 640, 3]
+    left: [480, 640, 3]
+  
   hand_command_modes:
     rhand: joint_trajectory
     lhand: joint_trajectory

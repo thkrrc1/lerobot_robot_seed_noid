@@ -1,0 +1,100 @@
+dataset:
+  # One merged ROS 2 Bag directory = one LeRobot episode.
+  storage_id: mcap
+  repo_id: local/seed_noid
+  root: /home/seed/lerobot_datasets/seed_noid
+  robot_type: seed_noid
+  task: "Take the snacks off the shelf and move them up one shelf."
+  fps: 30
+  overwrite: true
+  inspect_only: false
+
+topics:
+  observation:
+    joint_states:
+      topic: /joint_states
+    cameras:
+      head:
+        topic: /camera1/image_raw/compressed
+        height: 480
+        width: 640
+      right:
+        topic: /camera2/image_raw/compressed
+        height: 480
+        width: 640
+      left:
+        topic: /camera3/image_raw/compressed
+        height: 480
+        width: 640
+
+  action:
+    joint_trajectory:
+      rarm: /rarm_controller/joint_trajectory
+      rhand: /rhand_controller/joint_trajectory
+      larm: /larm_controller/joint_trajectory
+      lhand: /lhand_controller/joint_trajectory
+      waist: /waist_controller/joint_trajectory
+      lifter: /lifter_controller/joint_trajectory
+      head: /head_controller/joint_trajectory
+
+layout:
+  # Fixed 24-axis contract:
+  # rarm(7) + rhand(1) + larm(7) + lhand(1)
+  # + waist(3) + lifter(2) + head(3) = 24
+  joint_groups:
+    rarm:
+      - r_shoulder_p_joint
+      - r_shoulder_r_joint
+      - r_shoulder_y_joint
+      - r_elbow_joint
+      - r_wrist_y_joint
+      - r_wrist_p_joint
+      - r_wrist_r_joint
+    rhand:
+      - r_thumb_joint
+    larm:
+      - l_shoulder_p_joint
+      - l_shoulder_r_joint
+      - l_shoulder_y_joint
+      - l_elbow_joint
+      - l_wrist_y_joint
+      - l_wrist_p_joint
+      - l_wrist_r_joint
+    lhand:
+      - l_thumb_joint
+    waist:
+      - waist_y_joint
+      - waist_p_joint
+      - waist_r_joint
+    lifter:
+      - knee_joint
+      - ankle_joint
+    head:
+      - neck_y_joint
+      - neck_p_joint
+      - neck_r_joint
+
+  # Do not change this order after training starts.
+  state_order_groups: [rarm, rhand, larm, lhand, waist, lifter, head]
+  action_order_groups: [rarm, rhand, larm, lhand, waist, lifter, head]
+
+action:
+  action_point_mode: final
+  action_mode: trajectory
+
+  # If a controller command is temporarily absent, use the measured pose as
+  # a hold target for that group. This is suitable only if the group is in fact
+  # stationary while its trajectory topic is absent.
+  missing_action_fallback: current_joint_state
+  max_trajectory_action_age: 0.25
+
+sync:
+  max_image_dt: 0.05
+  max_state_dt: 0.03
+  no_strict_state_joints: false
+
+writer:
+  no_videos: false
+  image_writer_processes: 2
+  image_writer_threads: 4
+  debug_json: /home/seed/lerobot_datasets/seed_noid_conversion.json

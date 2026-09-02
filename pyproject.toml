@@ -20,5 +20,5 @@ dependencies = [
 Documentation = "https://huggingface.co/docs/lerobot/integrate_hardware"
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 include = ["lerobot_robot_seed_noid*"]

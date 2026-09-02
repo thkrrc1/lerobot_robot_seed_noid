@@ -92,7 +92,7 @@ class SeedNoidConfig(RobotConfig):
     action_groups: list[str] = field(default_factory=lambda: list(DEFAULT_24AXIS_GROUP_ORDER))
 
     # Safety gate: expose 24 action features, but only command these groups.
-    command_groups: list[str] = field(default_factory=lambda: ["rarm"])
+    command_groups: list[str] = field(default_factory=lambda: list(DEFAULT_24AXIS_GROUP_ORDER))
 
     # ROS 2 controller mapping.
     controller_names: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_CONTROLLER_NAMES))
@@ -137,8 +137,8 @@ class SeedNoidConfig(RobotConfig):
 
     # ROS Image subscriptions. Keys are unprefixed LeRobot camera names, e.g.
     # ``camera1``. ``observation.images.`` is added by LeRobot's dataset tools.
-    ros_image_topics: dict[str, str] = field(default_factory=dict)
-    ros_image_shapes: dict[str, tuple[int, int, int]] = field(default_factory=dict)
+    ros_image_topics: dict[str, str] = field(default_factory=lambda: {"head": "/camera1/image_raw/compressed", "right": "/camera2/image_raw/compressed", "left": "/camera3/image_raw/compressed",})
+    ros_image_shapes: dict[str, tuple[int, int, int]] = field(default_factory=lambda: {"head": (480, 640, 3), "right": (480, 640, 3), "left": (480, 640, 3),})
     stale_image_s: float = 2.0
     missing_image_policy: str = "raise"
 
@@ -253,3 +253,4 @@ class SeedNoidConfig(RobotConfig):
             invalid = {key: value for key, value in self.max_relative_target.items() if float(value) <= 0}
             if invalid:
                 raise ValueError(f"max_relative_target values must be positive: {invalid}")
+

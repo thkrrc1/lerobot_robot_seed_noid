@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Configurable ROS 2 bag -> LeRobotDataset converter.
 
-Default behavior matches the earlier Noid mouse 24-axis converter:
+Default behavior uses the SEED Noid  dataset contract:
   image feature: observation.images.camera1
   image topic:   /camera/camera/color/image_raw
   state/action:  rarm,rhand,larm,lhand,waist,lifter,head joint order
@@ -37,58 +37,90 @@ except Exception as exc:  # pragma: no cover
     print(f"Import error: {exc}", file=sys.stderr)
     raise
 
-try:
-    from lerobot_ros_robot_adapter.ros_robot_config import (
-        DEFAULT_CONTROLLER_NAMES,
-        DEFAULT_JOINT_GROUPS,
-    )
-    from lerobot_ros_robot_adapter.runtime_config import (
-        RosCameraSpec,
-        joint_order_from_groups,
-        load_mapping,
-        load_yaml_or_json_config,
-        merge_joint_groups,
-        merge_string_maps,
-        parse_assignment_list,
-        parse_camera_specs,
-        parse_csv_list,
-        prefixed_image_key,
-        rosbag_config_to_argparse_defaults,
-    )
-    from topic_decoders import (
-        decode_numeric_message,
-        decode_tf_message,
-        names_for_spec,
-        shape_for_spec,
-    )
-except Exception:  # pragma: no cover - direct script execution from this directory
-    from ros_robot_config import DEFAULT_CONTROLLER_NAMES, DEFAULT_JOINT_GROUPS
-    from runtime_config import (  # type: ignore
-        RosCameraSpec,
-        joint_order_from_groups,
-        load_mapping,
-        load_yaml_or_json_config,
-        merge_joint_groups,
-        merge_string_maps,
-        parse_assignment_list,
-        parse_camera_specs,
-        parse_csv_list,
-        prefixed_image_key,
-        rosbag_config_to_argparse_defaults,
-    )
-    from lerobot_ros_robot_adapter.topic_decoders import (
-        decode_numeric_message,
-        decode_tf_message,
-        names_for_spec,
-        shape_for_spec,
-    )
+# This converter lives under legacy_tools/. Add that directory and the project
+# root to sys.path so it works both from an editable install and when invoked
+# directly from the checked-out package.
+_THIS_FILE = Path(__file__).resolve()
+_TOOLS_DIR = _THIS_FILE.parent
+_PROJECT_ROOT = _TOOLS_DIR.parent
+for _path in (str(_TOOLS_DIR), str(_PROJECT_ROOT)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
+
+from runtime_config import (  # type: ignore
+    RosCameraSpec,
+    joint_order_from_groups,
+    load_mapping,
+    load_yaml_or_json_config,
+    merge_joint_groups,
+    merge_string_maps,
+    parse_assignment_list,
+    parse_camera_specs,
+    parse_csv_list,
+    prefixed_image_key,
+    rosbag_config_to_argparse_defaults,
+)
+from topic_decoders import (  # type: ignore
+    decode_numeric_message,
+    decode_tf_message,
+    names_for_spec,
+    shape_for_spec,
+)
+
+# Canonical feature contract for SEED Noid.
+# Keep this converter independent of the currently enabled safety groups in
+# config_seed_noid.py: the runtime plugin may expose/command only a subset,
+# while the dataset contract intentionally contains all
+DEFAULT_JOINT_GROUPS = {
+    "rarm": [
+        "r_shoulder_p_joint",
+        "r_shoulder_r_joint",
+        "r_shoulder_y_joint",
+        "r_elbow_joint",
+        "r_wrist_y_joint",
+        "r_wrist_p_joint",
+        "r_wrist_r_joint",
+    ],
+    "rhand": ["r_thumb_joint"],
+    "larm": [
+        "l_shoulder_p_joint",
+        "l_shoulder_r_joint",
+        "l_shoulder_y_joint",
+        "l_elbow_joint",
+        "l_wrist_y_joint",
+        "l_wrist_p_joint",
+        "l_wrist_r_joint",
+    ],
+    "lhand": ["l_thumb_joint"],
+    "waist": ["waist_y_joint", "waist_p_joint", "waist_r_joint"],
+    "lifter": ["knee_joint", "ankle_joint"],
+    "head": ["neck_y_joint", "neck_p_joint", "neck_r_joint"],
+}
+
+DEFAULT_CONTROLLER_NAMES = {
+    "rarm": "rarm_controller",
+    "rhand": "rhand_controller",
+    "larm": "larm_controller",
+    "lhand": "lhand_controller",
+    "waist": "waist_controller",
+    "lifter": "lifter_controller",
+    "head": "head_controller",
+}
 
 
-DEFAULT_IMAGE_TOPIC = "/camera/camera/color/image_raw"
+DEFAULT_IMAGE_TOPIC = "/camera1/image_raw/compressed"
 DEFAULT_JOINT_STATES_TOPIC = "/joint_states"
-DEFAULT_TASK = "pick up the mouse from the desk, lift it, lower it, and place it back on the desk"
+DEFAULT_TASK = "Take the snacks off the shelf and move them up one shelf."
 DEFAULT_POLICY_GROUP_ORDER = ["rarm", "rhand", "larm", "lhand", "waist", "lifter", "head"]
-DEFAULT_ACTION_TOPICS = {group: f"/{controller}/joint_trajectory" for group, controller in DEFAULT_CONTROLLER_NAMES.items()}
+DEFAULT_ACTION_TOPICS = {
+    "rarm": "/rarm_controller/joint_trajectory",
+    "rhand": "/rhand_controller/joint_trajectory",
+    "larm": "/larm_controller/joint_trajectory",
+    "lhand": "/lhand_controller/joint_trajectory",
+    "waist": "/waist_controller/joint_trajectory",
+    "lifter": "/lifter_controller/joint_trajectory",
+    "head": "/head_controller/joint_trajectory",
+}
 
 
 @dataclass
@@ -207,34 +239,67 @@ def vector_from_joint_trajectory(msg: Any, joint_order: list[str], point_mode: s
 
 
 def image_msg_to_rgb_array(msg: Any) -> np.ndarray:
-    """Convert sensor_msgs/Image to HWC RGB uint8. Uses cv_bridge if present, with a fallback."""
+    """Convert sensor_msgs/Image or sensor_msgs/CompressedImage to HWC RGB uint8."""
+    # sensor_msgs/CompressedImage has ``format`` and ``data`` but no height/width.
+    if hasattr(msg, "format") and not hasattr(msg, "encoding"):
+        try:
+            import cv2
+        except Exception as exc:
+            raise RuntimeError(
+                "opencv-python is required to decode sensor_msgs/CompressedImage"
+            ) from exc
+
+        encoded = np.frombuffer(msg.data, dtype=np.uint8)
+        bgr = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
+        if bgr is None:
+            raise ValueError(f"Failed to decode CompressedImage format={getattr(msg, 'format', '')!r}")
+        return np.ascontiguousarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), dtype=np.uint8)
+
+    # sensor_msgs/Image
     try:
         from cv_bridge import CvBridge
 
         bridge = CvBridge()
-        return bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
+        return np.ascontiguousarray(bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8"), dtype=np.uint8)
     except Exception:
         pass
 
     encoding = str(msg.encoding).lower()
-    h, w = int(msg.height), int(msg.width)
-    data = np.frombuffer(msg.data, dtype=np.uint8)
+    h, w, step = int(msg.height), int(msg.width), int(msg.step)
+    channels = {
+        "rgb8": 3,
+        "8uc3": 3,
+        "bgr8": 3,
+        "rgba8": 4,
+        "8uc4": 4,
+        "bgra8": 4,
+        "mono8": 1,
+        "8uc1": 1,
+    }.get(encoding)
+    if channels is None:
+        raise ValueError(f"Unsupported raw Image encoding: {msg.encoding}")
+
+    required_row = w * channels
+    if step < required_row:
+        raise ValueError(f"Image.step={step} is smaller than required row bytes={required_row}")
+    buf = np.frombuffer(msg.data, dtype=np.uint8)
+    required_size = h * step
+    if buf.size < required_size:
+        raise ValueError(f"Image data too short: got={buf.size}, required={required_size}")
+    rows = buf[:required_size].reshape(h, step)
+    arr = rows[:, :required_row].reshape(h, w, channels)
 
     if encoding in {"rgb8", "8uc3"}:
-        return data.reshape(h, w, 3).copy()
-    if encoding == "bgr8":
-        arr = data.reshape(h, w, 3)
-        return arr[:, :, ::-1].copy()
-    if encoding in {"rgba8", "8uc4"}:
-        return data.reshape(h, w, 4)[:, :, :3].copy()
-    if encoding == "bgra8":
-        arr = data.reshape(h, w, 4)[:, :, :3]
-        return arr[:, :, ::-1].copy()
-    if encoding in {"mono8", "8uc1"}:
-        arr = data.reshape(h, w)
-        return np.repeat(arr[:, :, None], 3, axis=2).copy()
-
-    raise ValueError(f"Unsupported image encoding without cv_bridge fallback: {msg.encoding}")
+        rgb = arr
+    elif encoding == "bgr8":
+        rgb = arr[:, :, ::-1]
+    elif encoding in {"rgba8", "8uc4"}:
+        rgb = arr[:, :, :3]
+    elif encoding == "bgra8":
+        rgb = arr[:, :, [2, 1, 0]]
+    else:
+        rgb = np.repeat(arr, 3, axis=2)
+    return np.ascontiguousarray(rgb, dtype=np.uint8)
 
 
 def resize_image_if_needed(img: np.ndarray, height: int | None, width: int | None) -> np.ndarray:
@@ -773,7 +838,7 @@ def create_lerobot_dataset(
     image_writer_threads: int,
 ):
     try:
-        from lerobot.datasets.lerobot_dataset import LeRobotDataset
+        from lerobot.datasets import LeRobotDataset
     except Exception as exc:
         raise RuntimeError(
             "LeRobot is not importable. Install it in your ROS/Python environment first, e.g. `pip install lerobot` "
@@ -884,15 +949,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Convert ROS 2 bag(s) to LeRobotDataset for noid mouse task",
         parents=[config_parser],
     )
-    if config_defaults:
-        parser.set_defaults(**config_defaults)
-
     parser.add_argument("--bag", nargs="+", required="bag" not in config_defaults, help="One or more rosbag2 directories. Each bag becomes one episode.")
     parser.add_argument("--storage-id", default="auto", help="sqlite3, mcap, or auto")
 
     parser.add_argument("--repo-id", default="local/noid_mouse_pick_lift_place_configurable")
     parser.add_argument("--root", default=None, help="Optional LeRobot local root directory, e.g. ./lerobot_data")
-    parser.add_argument("--robot-type", default="ros_robot_adapter")
+    parser.add_argument("--robot-type", default="seed_noid")
     parser.add_argument("--task", default=DEFAULT_TASK)
     parser.add_argument("--fps", type=float, default=10.0)
     parser.add_argument("--overwrite", action="store_true")
@@ -901,8 +963,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # Observation topics.
     parser.add_argument("--image-topic", default=DEFAULT_IMAGE_TOPIC, help="Backward-compatible single camera topic.")
     parser.add_argument("--joint-states-topic", default=DEFAULT_JOINT_STATES_TOPIC)
-    parser.add_argument("--image-height", type=int, default=720)
-    parser.add_argument("--image-width", type=int, default=1280)
+    parser.add_argument("--image-height", type=int, default=480)
+    parser.add_argument("--image-width", type=int, default=640)
     parser.add_argument(
         "--camera",
         action="append",
@@ -967,6 +1029,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--image-writer-processes", type=int, default=2)
     parser.add_argument("--image-writer-threads", type=int, default=4)
     parser.add_argument("--debug-json", default=None, help="Optional path to save conversion summary JSON.")
+    if config_defaults:
+        parser.set_defaults(**config_defaults)
     return parser.parse_args(argv)
 
 
@@ -1110,7 +1174,7 @@ def main() -> None:
     if args.root:
         print(f"root: {args.root}")
     print("Load check example:")
-    print("  from lerobot.datasets.lerobot_dataset import LeRobotDataset")
+    print("  from lerobot.datasets import LeRobotDataset")
     if args.root:
         print(f"  ds = LeRobotDataset('{args.repo_id}', root='{args.root}')")
     else:
