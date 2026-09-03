@@ -80,6 +80,8 @@ python -m pip install "lerobot==0.6.0"
 python -m pip install "lerobot[dataset]==0.6.0"
 python -m pip install "lerobot[training]==0.6.0"
 python -m pip install "lerobot[pi,async]==0.6.0"
+python -m pip install cffi
+
 
 cd {LEROBOT_WS}
 git clone https://github.com/thkrrc1/lerobot_robot_seed_noid.git
